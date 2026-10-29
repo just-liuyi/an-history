@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>历史记录</title>
+  <link rel="icon" href="icons/icon32.png">
+  <link rel="stylesheet" href="history.css">
+</head>
+<body>
+  <header id="toolbar" class="toolbar">
+    <div class="tb-normal">
+      <div class="tb-left">
+        <button id="menuBtn" class="icon-btn only-narrow" type="button" title="主菜单" aria-label="主菜单">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+        </button>
+        <h1 class="tb-title">历史记录</h1>
+      </div>
+
+      <div class="tb-center">
+        <label class="search-field">
+          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg>
+          <input id="search" type="search" placeholder="搜索历史记录" autocomplete="off" spellcheck="false" aria-label="搜索历史记录">
+          <button id="searchClear" class="icon-btn small" type="button" title="清除搜索" aria-label="清除搜索" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </label>
+      </div>
+
+      <div class="tb-right">
+        <span id="syncBadge" class="sync-badge" hidden></span>
+        <button id="refresh" class="icon-btn" type="button" title="同步最新历史记录" aria-label="同步最新历史记录">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="tb-select">
+      <button id="selClear" class="icon-btn" type="button" title="清除所选内容" aria-label="清除所选内容">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+      </button>
+      <span id="selCount" class="sel-count">已选择 0 项</span>
+      <div class="sel-actions">
+        <button id="selCancel" class="btn" type="button">取消</button>
+        <button id="selDelete" class="btn primary" type="button">删除</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="历史记录导航">
+      <button id="navAll" class="nav-item active" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 1 1 2.05 4.95l-1.42 1.42A9 9 0 1 0 13 3m-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8z"/></svg>
+        <span class="nav-label">全部网站</span>
+        <span id="allCount" class="nav-count"></span>
+      </button>
+
+      <div class="nav-section">
+        <input id="domainFilter" class="nav-filter" placeholder="筛选网站" autocomplete="off" spellcheck="false" aria-label="筛选网站">
+      </div>
+
+      <div id="domainList" class="domain-list"></div>
+
+      <div class="nav-footer">
+        <button id="clearData" class="nav-item" type="button">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 16h4v2h-4zm0-8h7v2h-7zm0 4h6v2h-6zM3 18c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V8H3zM14 5h-3l-1-1H6L5 5H2v2h12z"/></svg>
+          <span class="nav-label">删除浏览数据</span>
+          <svg class="nav-trailing" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z"/></svg>
+        </button>
+        <div id="sideFoot" class="side-foot"></div>
+      </div>
+    </nav>
+
+    <div id="scrim" class="scrim" hidden></div>
+
+    <main class="content">
+      <div class="content-head">
+        <div class="tabs" role="tablist" aria-label="显示方式">
+          <button class="tab active" type="button" role="tab" data-view="site" aria-selected="true">按网站</button>
+          <button class="tab" type="button" role="tab" data-view="date" aria-selected="false">按时间</button>
+        </div>
+        <select id="sort" class="sort-select" aria-label="网站排序方式" title="网站排序方式">
+          <option value="recent">最近访问优先</option>
+          <option value="alpha">网站名称 A–Z</option>
+        </select>
+      </div>
+
+      <div class="list-wrap">
+        <div id="list" class="list">
+          <div id="spacer"><div id="rows"></div></div>
+        </div>
+
+        <div id="empty" class="state hidden">
+          <div id="emptyTitle" class="state-title">暂无历史记录</div>
+          <div id="emptyHint" class="state-hint"></div>
+        </div>
+
+        <div id="loading" class="state hidden">
+          <div class="spinner" aria-hidden="true"></div>
+          <div id="loadingText" class="state-hint" role="status">正在读取历史记录…</div>
+        </div>
+
+        <div id="error" class="state hidden">
+          <div id="errorText" class="state-title"></div>
+          <button id="retry" class="btn" type="button">重试</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div id="rowMenu" class="menu" role="menu" hidden>
+    <button id="menuFilter" class="menu-item" type="button" role="menuitem">更多来自此网站的记录</button>
+    <button id="menuCopy" class="menu-item" type="button" role="menuitem">复制链接</button>
+    <button id="menuRemove" class="menu-item" type="button" role="menuitem">从历史记录中移除</button>
+  </div>
+
+  <dialog id="confirm" class="dialog">
+    <h2 id="confirmTitle" class="dialog-title">删除历史记录？</h2>
+    <p id="confirmText" class="dialog-body"></p>
+    <p class="dialog-note">删除后无法恢复，这些网址也不会再作为历史记录出现在地址栏建议中。</p>
+    <div class="dialog-actions">
+      <button id="confirmCancel" class="btn" type="button">取消</button>
+      <button id="confirmOk" class="btn primary" type="button">删除</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
