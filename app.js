@@ -11,6 +11,15 @@ const DAY_MS = 86400000;
 
 const $ = (id) => document.getElementById(id);
 
+/** 元素缺失时跳过绑定，避免抛出 "Cannot read properties of null (reading 'addEventListener')"。 */
+function on(target, type, handler, options) {
+  if (!target || typeof target.addEventListener !== 'function') {
+    console.warn('[an-history] skip listener:', type, '(element missing)');
+    return;
+  }
+  target.addEventListener(type, handler, options);
+}
+
 const els = {
   toolbar: $('toolbar'),
   menuBtn: $('menuBtn'),
@@ -30,6 +39,10 @@ const els = {
   sideFoot: $('sideFoot'),
   clearData: $('clearData'),
   sort: $('sort'),
+  rangeBar: $('rangeBar'),
+  rangeStart: $('rangeStart'),
+  rangeEnd: $('rangeEnd'),
+  rangeClear: $('rangeClear'),
   list: $('list'),
   spacer: $('spacer'),
   rows: $('rows'),
@@ -65,11 +78,14 @@ const state = {
   filterHost: null,
   query: '',
   sort: 'recent',
+  rangeStart: null,
+  rangeEnd: null,
   selection: new Set(),
   lastCheckedUrl: null,
   menuUrl: null,
   dirty: false,
   syncing: false,
+  deleting: false,
   initialized: false,
   scrollFrame: 0,
 };
@@ -126,6 +142,47 @@ function visitLabel(ts) {
 
 function fullTime(ts) {
   return ts ? fullFmt.format(ts) : '';
+}
+
+/* ---------------- 时间范围 ---------------- */
+
+function toDateInputValue(ts) {
+  if (ts == null) return '';
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function syncRangeInputs() {
+  if (!els.rangeStart || !els.rangeEnd) return;
+  els.rangeStart.value = toDateInputValue(state.rangeStart);
+  els.rangeEnd.value = toDateInputValue(state.rangeEnd);
+}
+
+function readRangeFromInputs() {
+  const parseDay = (value) => {
+    if (!value) return null;
+    const ts = new Date(`${value}T00:00:00`).getTime();
+    return Number.isFinite(ts) ? ts : null;
+  };
+
+  let startDay = parseDay(els.rangeStart.value);
+  let endDay = parseDay(els.rangeEnd.value);
+  if (startDay != null && endDay != null && startDay > endDay) {
+    [startDay, endDay] = [endDay, startDay];
+  }
+
+  state.rangeStart = startDay;
+  state.rangeEnd = endDay != null ? endDay + DAY_MS - 1 : null;
+  syncRangeInputs();
+  refreshView({ resetScroll: true });
+}
+
+function clearRange() {
+  state.rangeStart = null;
+  state.rangeEnd = null;
+  syncRangeInputs();
+  refreshView({ resetScroll: true });
 }
 
 function prettyUrl(url) {
@@ -240,9 +297,22 @@ function buildDateGroups() {
   return groups;
 }
 
+function hasRange() {
+  return state.rangeStart != null || state.rangeEnd != null;
+}
+
+function rangeBounds() {
+  if (!hasRange()) return null;
+  return {
+    start: state.rangeStart != null ? state.rangeStart : 0,
+    end: state.rangeEnd != null ? state.rangeEnd : Number.MAX_SAFE_INTEGER,
+  };
+}
+
 function computeRows() {
   const query = state.query.trim().toLowerCase();
   const groups = state.view === 'date' ? state.dateGroups : state.siteGroups;
+  const bounds = state.view === 'date' ? rangeBounds() : null;
   const rows = [];
   const byKey = new Map();
 
@@ -254,6 +324,9 @@ function computeRows() {
       } else {
         list = list.filter((entry) => entry.hostname === state.filterHost);
       }
+    }
+    if (bounds) {
+      list = list.filter((entry) => entry.lastVisitTime >= bounds.start && entry.lastVisitTime <= bounds.end);
     }
     if (query) list = list.filter((entry) => matchEntry(entry, query));
     if (!list.length) continue;
@@ -456,6 +529,8 @@ function render() {
   els.rows.replaceChildren(fragment);
 }
 
+let sidebarSignature = '';
+
 function renderSidebar() {
   els.navAll.classList.toggle('active', !state.filterHost);
   els.navAll.setAttribute('aria-current', state.filterHost ? 'false' : 'page');
@@ -463,6 +538,18 @@ function renderSidebar() {
 
   const query = els.domainFilter.value.trim().toLowerCase();
   const groups = query ? state.siteGroups.filter((g) => g.hostname.includes(query)) : state.siteGroups;
+  const footprint = `${query}|${state.filterHost || ''}|${groups
+    .slice(0, SIDEBAR_LIMIT)
+    .map((g) => `${g.hostname}:${g.count}`)
+    .join(',')}|${groups.length}|${state.entries.size}`;
+
+  // 内容没有变化时保留已有 DOM：频繁重建会在点击瞬间把按钮换掉，造成“点了没反应”。
+  if (footprint === sidebarSignature) {
+    els.sideFoot.textContent = `${state.siteGroups.length} 个网站 · ${state.entries.size} 条记录`;
+    return;
+  }
+  sidebarSignature = footprint;
+
   const fragment = document.createDocumentFragment();
 
   for (const group of groups.slice(0, SIDEBAR_LIMIT)) {
@@ -515,6 +602,9 @@ function updateEmptyState() {
     els.emptyHint.textContent = state.filterHost
       ? `在 ${state.filterHost} 中没有匹配“${state.query.trim()}”的记录。`
       : `没有匹配“${state.query.trim()}”的记录。`;
+  } else if (state.view === 'date' && hasRange()) {
+    els.emptyTitle.textContent = '所选时间范围内没有记录';
+    els.emptyHint.textContent = '调整开始或结束日期，或点击“清除”查看全部时间。';
   } else {
     els.emptyTitle.textContent = '该网站没有历史记录';
     els.emptyHint.textContent = '在左侧选择“全部网站”查看其他记录。';
@@ -534,6 +624,7 @@ function updateTabs() {
     tab.setAttribute('aria-selected', String(active));
   }
   els.sort.hidden = state.view !== 'site';
+  if (els.rangeBar) els.rangeBar.hidden = state.view !== 'date';
 }
 
 function refreshView({ resetScroll = false } = {}) {
@@ -560,6 +651,9 @@ function refreshAll() {
 }
 
 function scheduleRefresh() {
+  // 批量删除期间不重建界面：每删一条都会触发 onVisitRemoved，
+  // 逐条刷新会造成卡顿，也会让侧边栏在点击瞬间被重建，出现“点了没反应”。
+  if (state.deleting) return;
   if (document.hidden) {
     state.dirty = true;
     return;
@@ -604,13 +698,35 @@ function setQuery(value) {
 
 /* ---------------- 选择 ---------------- */
 
+/**
+ * 只更新可见行的选中样式，不重建列表 DOM。
+ * 重建会让正在点击的复选框被替换掉，表现为“连续勾选只生效一条”。
+ */
+function syncSelectionDom() {
+  for (const card of els.rows.querySelectorAll('.card-entry')) {
+    const box = card.querySelector('input.row-check');
+    const selected = state.selection.has(card.dataset.url);
+    card.classList.toggle('selected', selected);
+    if (box) box.checked = selected;
+  }
+  for (const head of els.rows.querySelectorAll('.card-head')) {
+    const box = head.querySelector('input.row-check');
+    if (!box) continue;
+    const entries = state.rowEntriesByKey.get(box.dataset.key) || [];
+    let selected = 0;
+    for (const entry of entries) if (state.selection.has(entry.url)) selected++;
+    box.checked = entries.length > 0 && selected === entries.length;
+    box.indeterminate = selected > 0 && selected < entries.length;
+  }
+  updateSelectionBar();
+}
+
 function setSelected(urls, selected) {
   for (const url of urls) {
     if (selected) state.selection.add(url);
     else state.selection.delete(url);
   }
-  updateSelectionBar();
-  render();
+  syncSelectionDom();
 }
 
 function entryUrlsBetween(fromUrl, toUrl) {
@@ -637,8 +753,7 @@ function entryUrlsBetween(fromUrl, toUrl) {
 function clearSelection() {
   state.selection.clear();
   state.lastCheckedUrl = null;
-  updateSelectionBar();
-  render();
+  syncSelectionDom();
 }
 
 /* ---------------- 行菜单 ---------------- */
@@ -714,9 +829,22 @@ function applyUrlParams() {
 }
 
 async function init() {
+  const missing = Object.entries(els)
+    .filter(([, el]) => !el)
+    .map(([name]) => name);
+  if (missing.length) {
+    console.error('[an-history] 页面缺少元素：', missing.join(', '));
+    const notice = document.createElement('p');
+    notice.style.cssText = 'margin:48px auto;max-width:520px;text-align:center;font:14px/1.6 system-ui,sans-serif;';
+    notice.textContent = '页面文件与脚本版本不一致，请在 chrome://extensions 中重新加载 an-history，然后刷新本页。';
+    document.body.replaceChildren(notice);
+    return;
+  }
+
   bindEvents();
   applyUrlParams();
   updateTabs();
+  syncRangeInputs();
 
   if (!globalThis.chrome || !chrome.history) {
     showError('当前环境无法访问浏览器历史记录接口，请通过扩展打开本页。');
@@ -784,9 +912,30 @@ function startRealtime() {
 
 /* ---------------- 删除 ---------------- */
 
-async function deleteUrls(urls) {
-  const queue = urls.slice();
+async function performDelete(urls) {
+  const unique = [...new Set(urls)].filter((url) => state.entries.has(url));
+  if (!unique.length || state.deleting) return;
+
+  const snapshot = new Map(unique.map((url) => [url, state.entries.get(url)]));
+
+  // 先在界面上移除，删除在后台继续，避免弹窗卡住或界面长时间无响应。
+  state.deleting = true;
+  for (const url of unique) {
+    state.entries.delete(url);
+    state.selection.delete(url);
+  }
+  refreshAll();
+  setSyncBadge(`正在删除 0/${unique.length}`);
+
   const result = { ok: 0, fail: 0 };
+  const failed = [];
+  const queue = unique.slice();
+  let done = 0;
+  const bump = () => {
+    done++;
+    if (done % 20 === 0 || done === unique.length) setSyncBadge(`正在删除 ${done}/${unique.length}`);
+  };
+
   const workers = Array.from({ length: Math.min(DELETE_CONCURRENCY, queue.length) }, async () => {
     while (queue.length) {
       const url = queue.pop();
@@ -795,28 +944,30 @@ async function deleteUrls(urls) {
         result.ok++;
       } catch (err) {
         result.fail++;
+        failed.push(url);
         console.warn('[an-history] deleteUrl failed', url, err);
       }
+      bump();
+      // 让出主线程，保证删除过程中界面仍可点击
+      if (done % 10 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     }
   });
   await Promise.all(workers);
-  return result;
-}
 
-async function performDelete(urls) {
-  const unique = [...new Set(urls)].filter((url) => state.entries.has(url));
-  if (!unique.length) return;
-
-  const result = await deleteUrls(unique);
+  const failedSet = new Set(failed);
   try {
-    await removeUrls(unique);
+    await removeUrls(unique.filter((url) => !failedSet.has(url)));
   } catch (err) {
     console.warn('[an-history] db remove failed', err);
   }
-  for (const url of unique) {
-    state.entries.delete(url);
-    state.selection.delete(url);
+
+  for (const url of failed) {
+    const entry = snapshot.get(url);
+    if (entry) state.entries.set(url, entry);
   }
+
+  state.deleting = false;
+  setSyncBadge('');
   refreshAll();
   toast(result.fail ? `已删除 ${result.ok} 条，${result.fail} 条删除失败` : `已删除 ${result.ok} 条记录`);
 }
@@ -878,18 +1029,18 @@ function askDeleteGroup(key) {
 
 function bindEvents() {
   let searchTimer = 0;
-  els.search.addEventListener('input', () => {
+  on(els.search, 'input', () => {
     els.searchClear.hidden = !els.search.value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => setQuery(els.search.value), 150);
   });
-  els.searchClear.addEventListener('click', () => {
+  on(els.searchClear, 'click', () => {
     els.search.value = '';
     setQuery('');
     els.search.focus();
   });
 
-  els.refresh.addEventListener('click', async () => {
+  on(els.refresh, 'click', async () => {
     if (state.syncing || !state.initialized) return;
     state.syncing = true;
     els.refresh.disabled = true;
@@ -910,40 +1061,44 @@ function bindEvents() {
     }
   });
 
-  els.selClear.addEventListener('click', clearSelection);
-  els.selCancel.addEventListener('click', clearSelection);
-  els.selDelete.addEventListener('click', () => askDeleteUrls([...state.selection]));
+  on(els.selClear, 'click', clearSelection);
+  on(els.selCancel, 'click', clearSelection);
+  on(els.selDelete, 'click', () => askDeleteUrls([...state.selection]));
 
-  els.navAll.addEventListener('click', () => setFilterHost(null));
-  els.domainList.addEventListener('click', (event) => {
+  on(els.navAll, 'click', () => setFilterHost(null));
+  on(els.domainList, 'click', (event) => {
     const button = event.target.closest('.domain-item');
     if (button) setFilterHost(button.dataset.host);
   });
-  els.domainFilter.addEventListener('input', renderSidebar);
+  on(els.domainFilter, 'input', renderSidebar);
 
-  els.clearData.addEventListener('click', () => {
+  on(els.clearData, 'click', () => {
     chrome.tabs.create({ url: 'chrome://settings/clearBrowserData' });
   });
 
-  els.menuBtn.addEventListener('click', () => {
+  on(els.menuBtn, 'click', () => {
     const open = !document.body.classList.contains('drawer-open');
     document.body.classList.toggle('drawer-open', open);
     els.scrim.hidden = !open;
   });
-  els.scrim.addEventListener('click', closeDrawer);
+  on(els.scrim, 'click', closeDrawer);
 
   for (const tab of tabButtons) {
     tab.addEventListener('click', () => setView(tab.dataset.view));
   }
 
-  els.sort.addEventListener('change', () => {
+  on(els.sort, 'change', () => {
     state.sort = els.sort.value;
     refreshAll();
     els.list.scrollTop = 0;
     render();
   });
 
-  els.rows.addEventListener('click', (event) => {
+  on(els.rangeStart, 'change', readRangeFromInputs);
+  on(els.rangeEnd, 'change', readRangeFromInputs);
+  on(els.rangeClear, 'click', clearRange);
+
+  on(els.rows, 'click', (event) => {
     const checkbox = event.target.closest('input.row-check');
     if (checkbox) {
       if (checkbox.dataset.action === 'select-entry') {
@@ -972,11 +1127,11 @@ function bindEvents() {
     if (groupDelete) askDeleteGroup(groupDelete.dataset.key);
   });
 
-  els.menuFilter.addEventListener('click', () => {
+  on(els.menuFilter, 'click', () => {
     const entry = state.entries.get(state.menuUrl);
     if (entry) setFilterHost(entry.hostname);
   });
-  els.menuCopy.addEventListener('click', async () => {
+  on(els.menuCopy, 'click', async () => {
     const url = state.menuUrl;
     closeMenu();
     try {
@@ -986,7 +1141,7 @@ function bindEvents() {
       toast('无法复制链接');
     }
   });
-  els.menuRemove.addEventListener('click', () => {
+  on(els.menuRemove, 'click', () => {
     const url = state.menuUrl;
     closeMenu();
     if (url) askDeleteUrls([url]);
@@ -998,7 +1153,7 @@ function bindEvents() {
     }
   });
 
-  els.list.addEventListener(
+  on(els.list, 
     'scroll',
     () => {
       closeMenu();
@@ -1016,27 +1171,26 @@ function bindEvents() {
     render();
   });
 
-  els.confirmCancel.addEventListener('click', () => {
+  on(els.confirmCancel, 'click', () => {
     pendingConfirm = null;
     els.confirm.close();
   });
-  els.confirmOk.addEventListener('click', async () => {
+  on(els.confirmOk, 'click', () => {
     const task = pendingConfirm;
     pendingConfirm = null;
     if (!task) return;
-    els.confirmOk.disabled = true;
-    try {
-      await task();
-    } finally {
-      els.confirmOk.disabled = false;
-      if (els.confirm.open) els.confirm.close();
-    }
+    // 立刻关闭弹窗，删除进度通过顶栏提示展示，避免模态框长时间挡住页面。
+    if (els.confirm.open) els.confirm.close();
+    task().catch((err) => {
+      console.error('[an-history] delete failed', err);
+      toast(`删除失败：${err && err.message ? err.message : err}`);
+    });
   });
-  els.confirm.addEventListener('cancel', () => {
+  on(els.confirm, 'cancel', () => {
     pendingConfirm = null;
   });
 
-  els.retry.addEventListener('click', () => location.reload());
+  on(els.retry, 'click', () => location.reload());
 
   document.addEventListener('keydown', (event) => {
     const active = document.activeElement;
@@ -1077,4 +1231,4 @@ function bindEvents() {
   });
 }
 
-init();
+init().catch((err) => console.error('[an-history] init crashed', err));

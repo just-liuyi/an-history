@@ -79,6 +79,12 @@
           <button class="tab active" type="button" role="tab" data-view="site" aria-selected="true">按网站</button>
           <button class="tab" type="button" role="tab" data-view="date" aria-selected="false">按时间</button>
         </div>
+        <div id="rangeBar" class="range" hidden>
+          <input id="rangeStart" class="date-input" type="date" aria-label="开始日期" title="开始日期">
+          <span class="range-sep">至</span>
+          <input id="rangeEnd" class="date-input" type="date" aria-label="结束日期" title="结束日期">
+          <button id="rangeClear" class="text-btn" type="button">清除</button>
+        </div>
         <select id="sort" class="sort-select" aria-label="网站排序方式" title="网站排序方式">
           <option value="recent">最近访问优先</option>
           <option value="alpha">网站名称 A–Z</option>

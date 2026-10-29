@@ -340,7 +340,7 @@ svg { fill: currentColor; }
 
 .content-head {
   width: 100%;
-  max-width: calc(var(--card-max) + 32px);
+  max-width: calc(var(--card-max) + 40px);
   margin: 0 auto;
   padding: 0 16px;
   flex: none;
@@ -373,6 +373,35 @@ svg { fill: currentColor; }
   background: var(--primary);
 }
 
+/* 时间范围筛选 */
+.range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.range-sep {
+  color: var(--text3);
+  font-size: 12px;
+}
+.date-input {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--outline);
+  border-radius: 8px;
+  outline: none;
+  background: transparent;
+  color: var(--text2);
+  font-size: 12px;
+}
+.date-input:focus { border-color: var(--primary); }
+.date-input::-webkit-calendar-picker-indicator {
+  opacity: 0.6;
+  cursor: pointer;
+}
+@media (prefers-color-scheme: dark) {
+  .date-input::-webkit-calendar-picker-indicator { filter: invert(1); }
+}
+
 .sort-select {
   height: 32px;
   padding: 0 10px;
@@ -393,7 +422,13 @@ svg { fill: currentColor; }
 
 .list {
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  /* 滚动条贴着历史卡片右侧，且与左侧导航栏一样留 16px 间距 */
+  width: min(100%, calc(var(--card-max) + 40px));
+  margin-inline: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
